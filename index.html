@@ -24,6 +24,9 @@ button{width:100%;padding:11px;font-size:15px;font-weight:700;margin-top:6px;bor
 button:disabled{opacity:.6;cursor:default}
 .err{min-height:20px;color:var(--bad);font-size:13px;margin-top:8px}
 .foot{font-size:12px;color:var(--muted);margin-top:12px;text-align:center}
+.lnk{background:none;border:0;color:var(--brand);font-weight:700;padding:0;margin:0;width:auto;font-size:inherit;text-decoration:underline;cursor:pointer}
+.ok{background:#e9f4e4;border:1px solid #bcd9b0;color:#1f4a14;border-radius:8px;padding:12px;font-size:14px;margin:8px 0 4px}
+.sec{background:#eef1f3;color:var(--ink);font-weight:600}
 .wait{text-align:center;color:var(--muted)}
 .bar{height:4px;border-radius:4px;background:#e3e9ec;overflow:hidden;margin:14px 0 4px}
 .bar i{display:block;height:100%;width:40%;background:var(--brand);animation:a 1.1s ease-in-out infinite}
@@ -43,11 +46,14 @@ button:disabled{opacity:.6;cursor:default}
   var keep = function(s){ try { s ? localStorage.setItem(KS, JSON.stringify(s)) : localStorage.removeItem(KS); } catch(e){} };
   var last = function(){ try { return JSON.parse(localStorage.getItem("gps_sb_last") || '""') || ""; } catch(e){ return ""; } };
   function errTxt(j, st){ var m = (j && (j.msg || j.message || j.error_description || j.error)) || ("erro " + st);
-    return /Invalid login/i.test(m) ? "E-mail ou senha incorretos." : /Email not confirmed/i.test(m) ? "E-mail ainda não confirmado." : /Failed to fetch|NetworkError/i.test(m) ? "Sem conexão com o servidor." : m; }
+    return /Invalid login/i.test(m) ? "E-mail ou senha incorretos." : /Email not confirmed/i.test(m) ? "E-mail ainda não confirmado." : /Failed to fetch|NetworkError/i.test(m) ? "Sem conexão com o servidor." :
+      /already registered|already been registered|exists/i.test(m) ? "Esse e-mail já tem conta. Use \u201cEntrar\u201d." : /Signups? not allowed|signup.*disabled/i.test(m) ? "O cadastro pela tela está fechado. Fale com o ADM." :
+      /Password should|weak|at least/i.test(m) ? "Senha fraca: use pelo menos 8 caracteres, com letras e números." : /invalid.*email|Unable to validate email|email.*invalid/i.test(m) ? "E-mail inválido." :
+      /só com e-mail|volga\.com\.br/i.test(m) ? "Cadastro só com e-mail @volga.com.br." : /rate limit|too many/i.test(m) ? "Muitas tentativas. Espere alguns minutos e tente de novo." : m; }
   function auth(path, body){
     return fetch(SB.url + "/auth/v1/" + path, {method: "POST", headers: {apikey: SB.key, "Content-Type": "application/json"}, body: JSON.stringify(body)})
       .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok) throw new Error(errTxt(j, r.status));
-        return {access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000, user: j.user}; }); });
+        return {access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000, user: j.user || (j.id ? j : null)}; }); });
   }
   function token(){
     var s = sess(); if (!s) return Promise.reject(Object.assign(new Error(""), {login: true}));
@@ -65,6 +71,12 @@ button:disabled{opacity:.6;cursor:default}
         if (!r.ok) throw new Error(r.status === 400 || r.status === 403 || r.status === 404 ? "Seu usuário não tem acesso à ferramenta (ou está desativado). Fale com o ADM." : "O servidor não respondeu (erro " + r.status + "). Tente de novo.");
         return r.text(); });
   }
+  /* 28/10/2026: conta criada pela tela nasce "aguardando aprovação do ADM" */
+  function situacao(tok){ var s = sess(), id = s && s.user && s.user.id; if (!id) return Promise.resolve(tok);
+    return fetch(SB.url + "/rest/v1/profiles?select=ativo,revisado&id=eq." + encodeURIComponent(id), {cache: "no-store", headers: {apikey: SB.key, Authorization: "Bearer " + tok}})
+      .then(function(r){ return r.ok ? r.json() : null; }, function(){ return null; }).then(function(a){ var p = a && a[0];
+        if (p && !p.ativo) throw Object.assign(new Error(p.revisado === false ? "Sua conta foi criada e está aguardando a aprovação do ADM. Assim que ele aprovar, é só entrar de novo." : "Seu acesso está bloqueado. Fale com o ADM."), {pend: true});
+        return tok; }); }
   function motor(tok){
     return obj(tok, "versao.txt").then(function(v){ v = v.trim();
       return cacheGet().then(function(c){ if (c && c.ver === v && c.html) return c.html;
@@ -76,11 +88,12 @@ button:disabled{opacity:.6;cursor:default}
   function falha(msg){ box.innerHTML = topo() + '<div class="err" role="alert">' + esc(msg) + '</div><button type="button" id="sbTry">Tentar de novo</button>';
     document.getElementById("sbTry").onclick = abrir; }
   function login(msg){
-    box.innerHTML = topo() + '<form id="sbForm" novalidate><p>Entre com o e-mail e a senha que o ADM cadastrou para você.</p>' +
+    box.innerHTML = topo() + '<form id="sbForm" novalidate><p>Entre com seu e-mail e senha.</p>' +
       '<label for="sbEmail">E-mail<input id="sbEmail" type="email" autocomplete="username" required value="' + esc(last()) + '"></label>' +
       '<label for="sbPass">Senha<input id="sbPass" type="password" autocomplete="current-password" required></label>' +
       '<button type="submit" id="sbGo">Entrar</button><div class="err" id="sbErr" role="alert">' + esc(msg || "") + '</div>' +
-      '<div class="foot">Esqueceu a senha ou precisa de acesso? Fale com o ADM da ferramenta.</div></form>';
+      '<div class="foot">Não tem conta? <button type="button" class="lnk" id="sbNew">Criar conta</button><br>Esqueceu a senha? Fale com o ADM da ferramenta.</div></form>';
+    document.getElementById("sbNew").onclick = function(){ cadastro(); };
     var e = document.getElementById("sbEmail"), p = document.getElementById("sbPass"), b = document.getElementById("sbGo");
     setTimeout(function(){ (e.value ? p : e).focus(); }, 0);
     document.getElementById("sbForm").onsubmit = function(ev){ ev.preventDefault(); b.disabled = true; b.textContent = "Entrando…"; document.getElementById("sbErr").textContent = "";
@@ -88,10 +101,37 @@ button:disabled{opacity:.6;cursor:default}
       auth("token?grant_type=password", {email: em, password: p.value}).then(function(s){ keep(s); try { localStorage.setItem("gps_sb_last", JSON.stringify(em)); } catch(x){} abrir(); },
         function(x){ document.getElementById("sbErr").textContent = x.message; b.disabled = false; b.textContent = "Entrar"; p.select(); }); };
   }
+  /* 28/10/2026 (Gabriel): o usuário cria a própria conta; ela fica bloqueada até o ADM aprovar */
+  function cadastro(msg){
+    box.innerHTML = topo() + '<form id="sbCad" novalidate><p>Crie sua conta. Ela só libera o acesso depois que o ADM aprovar.</p>' +
+      '<label for="cdNome">Nome completo<input id="cdNome" autocomplete="name" maxlength="80" required></label>' +
+      '<label for="cdEmail">E-mail<input id="cdEmail" type="email" autocomplete="email" required></label>' +
+      '<label for="cdPass">Senha (mínimo 8 caracteres)<input id="cdPass" type="password" autocomplete="new-password" minlength="8" required></label>' +
+      '<label for="cdPass2">Repita a senha<input id="cdPass2" type="password" autocomplete="new-password" required></label>' +
+      '<button type="submit" id="cdGo">Criar conta</button><div class="err" id="cdErr" role="alert">' + esc(msg || "") + '</div>' +
+      '<div class="foot">Já tem conta? <button type="button" class="lnk" id="cdBack">Entrar</button></div></form>';
+    var n = document.getElementById("cdNome"), e = document.getElementById("cdEmail"), p = document.getElementById("cdPass"), p2 = document.getElementById("cdPass2"), b = document.getElementById("cdGo"), er = document.getElementById("cdErr");
+    setTimeout(function(){ n.focus(); }, 0);
+    document.getElementById("cdBack").onclick = function(){ login(); };
+    document.getElementById("sbCad").onsubmit = function(ev){ ev.preventDefault(); er.textContent = "";
+      var nm = n.value.trim().replace(/\s+/g, " "), em = e.value.trim().toLowerCase();
+      if (nm.length < 3) { er.textContent = "Escreva seu nome."; n.focus(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { er.textContent = "E-mail inválido."; e.focus(); return; }
+      if (p.value.length < 8 || !/[a-z]/i.test(p.value) || !/\d/.test(p.value)) { er.textContent = "Senha fraca: use pelo menos 8 caracteres, com letras e números."; p.focus(); return; }
+      if (p.value !== p2.value) { er.textContent = "As duas senhas não são iguais."; p2.focus(); p2.select(); return; }
+      b.disabled = true; b.textContent = "Criando…";
+      auth("signup", {email: em, password: p.value, data: {nome: nm}}).then(function(){
+        try { localStorage.setItem("gps_sb_last", JSON.stringify(em)); } catch(x){}
+        keep(null);   /* não entra: espera a aprovação */
+        box.innerHTML = topo() + '<div class="ok" role="status"><b>Conta criada!</b><br>Agora o ADM precisa aprovar seu acesso. Quando ele aprovar, é só entrar com seu e-mail e senha.</div>' +
+          '<button type="button" id="cdOk">Voltar para entrar</button>';
+        document.getElementById("cdOk").onclick = function(){ login(); };
+      }, function(x){ er.textContent = x.message; b.disabled = false; b.textContent = "Criar conta"; }); };
+  }
   function abrir(){
     espera("Abrindo a ferramenta…");
-    token().then(motor).then(function(h){ document.open(); document.write(h); document.close(); },
-      function(x){ if (x && x.login) login(x.message); else falha(x && x.message ? x.message : "Não foi possível abrir a ferramenta."); });
+    token().then(situacao).then(motor).then(function(h){ document.open(); document.write(h); document.close(); },
+      function(x){ if (x && x.pend){ keep(null); login(x.message); } else if (x && x.login) login(x.message); else falha(x && x.message ? x.message : "Não foi possível abrir a ferramenta."); });
   }
   if (sess()) abrir(); else login();
 })();
