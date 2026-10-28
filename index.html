@@ -75,6 +75,7 @@ button:disabled{opacity:.6;cursor:default}
   function situacao(tok){ var s = sess(), id = s && s.user && s.user.id; if (!id) return Promise.resolve(tok);
     return fetch(SB.url + "/rest/v1/profiles?select=ativo,revisado&id=eq." + encodeURIComponent(id), {cache: "no-store", headers: {apikey: SB.key, Authorization: "Bearer " + tok}})
       .then(function(r){ return r.ok ? r.json() : null; }, function(){ return null; }).then(function(a){ var p = a && a[0];
+        if (Array.isArray(a) && !p) throw Object.assign(new Error("Sua conta ainda não foi liberada. Fale com o ADM."), {pend: true});
         if (p && !p.ativo) throw Object.assign(new Error(p.revisado === false ? "Sua conta foi criada e está aguardando a aprovação do ADM. Assim que ele aprovar, é só entrar de novo." : "Seu acesso está bloqueado. Fale com o ADM."), {pend: true});
         return tok; }); }
   function motor(tok){
