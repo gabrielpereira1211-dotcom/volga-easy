@@ -25,6 +25,9 @@ button:disabled{opacity:.6;cursor:default}
 .err{min-height:20px;color:var(--bad);font-size:13px;margin-top:8px}
 .foot{font-size:12px;color:var(--muted);margin-top:12px;text-align:center}
 .lnk{background:none;border:0;color:var(--brand);font-weight:700;padding:0;margin:0;width:auto;font-size:inherit;text-decoration:underline;cursor:pointer}
+.pw{position:relative;display:block;margin-top:4px}.pw input{margin-top:0;padding-right:46px}
+.eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:38px;height:36px;padding:0;margin:0;border-radius:6px;background:none;color:var(--muted);display:grid;place-items:center}
+.eye:hover,.eye:focus-visible{background:#eef1f3;color:var(--ink)}.eye[aria-pressed="true"]{color:var(--brand)}.eye svg{width:21px;height:21px}
 .ok{background:#e9f4e4;border:1px solid #bcd9b0;color:#1f4a14;border-radius:8px;padding:12px;font-size:14px;margin:8px 0 4px}
 .sec{background:#eef1f3;color:var(--ink);font-weight:600}
 .wait{text-align:center;color:var(--muted)}
@@ -88,12 +91,39 @@ button:disabled{opacity:.6;cursor:default}
   function espera(msg){ box.innerHTML = topo() + '<div class="wait"><div class="bar"><i></i></div>' + esc(msg) + "</div>"; }
   function falha(msg){ box.innerHTML = topo() + '<div class="err" role="alert">' + esc(msg) + '</div><button type="button" id="sbTry">Tentar de novo</button>';
     document.getElementById("sbTry").onclick = abrir; }
+  /* Gabriel 12/11/2026 11:07: olhinho para ver a senha (todos os campos de senha da portaria) */
+  var EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+      EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A11 11 0 0 1 12 5c6.4 0 10 7 10 7a17.5 17.5 0 0 1-3.2 4.1M6.6 6.6A17.3 17.3 0 0 0 2 12s3.6 7 10 7a10.7 10.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  function olhos(){ [].slice.call(box.querySelectorAll('input[type="password"]')).forEach(function(i){ var w = document.createElement("span"), b = document.createElement("button"); w.className = "pw"; i.parentNode.insertBefore(w, i); w.appendChild(i);
+      b.type = "button"; b.className = "eye"; b.innerHTML = EYE; b.title = "Mostrar a senha"; b.setAttribute("aria-label", "Mostrar a senha"); b.setAttribute("aria-pressed", "false");
+      b.onclick = function(){ var ver = i.type === "password"; i.type = ver ? "text" : "password"; b.innerHTML = ver ? EYE_OFF : EYE; b.title = ver ? "Esconder a senha" : "Mostrar a senha"; b.setAttribute("aria-label", b.title); b.setAttribute("aria-pressed", String(ver)); i.focus(); };
+      w.appendChild(b); }); }
+  /* Gabriel 12/11/2026 11:07: esqueceu a senha → o pedido vai para o Painel do ADM; ele aprova e a ferramenta gera a senha nova para ele passar à pessoa.
+     O pedido não diz se o e-mail tem conta (a resposta é sempre a mesma). Precisa do comando 99 - SISTEMA/SUPABASE/senha.sql rodado no Supabase; sem ele, a tela manda falar com o ADM. */
+  function esqueci(){
+    box.innerHTML = topo() + '<form id="esForm" novalidate><p>Informe o e-mail da sua conta. O pedido vai para o ADM da ferramenta; quando ele aprovar, ele te passa uma senha nova.</p>' +
+      '<label for="esEmail">E-mail<input id="esEmail" type="email" autocomplete="username" required value="' + esc(last()) + '"></label>' +
+      '<button type="submit" id="esGo">Pedir senha nova</button><div class="err" id="esErr" role="alert"></div>' +
+      '<div class="foot"><button type="button" class="lnk" id="esBack">Voltar para entrar</button></div></form>';
+    var e = document.getElementById("esEmail"), b = document.getElementById("esGo"), er = document.getElementById("esErr");
+    setTimeout(function(){ e.focus(); }, 0);
+    document.getElementById("esBack").onclick = function(){ login(); };
+    document.getElementById("esForm").onsubmit = function(ev){ ev.preventDefault(); er.textContent = ""; var em = e.value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { er.textContent = "E-mail inválido."; e.focus(); return; }
+      b.disabled = true; b.textContent = "Enviando…";
+      fetch(SB.url + "/rest/v1/rpc/pedir_senha", {method: "POST", headers: {apikey: SB.key, "Content-Type": "application/json"}, body: JSON.stringify({p_email: em})}).then(function(r){
+        if (r.ok){ box.innerHTML = topo() + '<div class="ok" role="status"><b>Pedido enviado.</b><br>Se este e-mail tiver conta, o ADM recebe o pedido. Quando ele aprovar, ele te passa a senha nova. Depois de entrar, troque a senha no menu com o seu nome.</div><button type="button" id="esOk">Voltar para entrar</button>';
+          document.getElementById("esOk").onclick = function(){ login(); }; return; }
+        er.textContent = r.status === 404 ? "O pedido de senha ainda não está ligado nesta ferramenta. Fale com o ADM." : "Não foi possível enviar o pedido (erro " + r.status + "). Fale com o ADM da ferramenta."; b.disabled = false; b.textContent = "Pedir senha nova";
+      }, function(){ er.textContent = "Sem conexão. Tente de novo."; b.disabled = false; b.textContent = "Pedir senha nova"; }); };
+  }
   function login(msg){
     box.innerHTML = topo() + '<form id="sbForm" novalidate><p>Entre com seu e-mail e senha.</p>' +
       '<label for="sbEmail">E-mail<input id="sbEmail" type="email" autocomplete="username" required value="' + esc(last()) + '"></label>' +
       '<label for="sbPass">Senha<input id="sbPass" type="password" autocomplete="current-password" required></label>' +
       '<button type="submit" id="sbGo">Entrar</button><div class="err" id="sbErr" role="alert">' + esc(msg || "") + '</div>' +
-      '<div class="foot">Não tem conta? <button type="button" class="lnk" id="sbNew">Criar conta</button><br>Esqueceu a senha? Fale com o ADM da ferramenta.</div></form>';
+      '<div class="foot">Não tem conta? <button type="button" class="lnk" id="sbNew">Criar conta</button><br>Esqueceu a senha? <button type="button" class="lnk" id="sbEsq">Pedir senha nova</button></div></form>';
+    olhos(); document.getElementById("sbEsq").onclick = function(){ esqueci(); };
     document.getElementById("sbNew").onclick = function(){ cadastro(); };
     var e = document.getElementById("sbEmail"), p = document.getElementById("sbPass"), b = document.getElementById("sbGo");
     setTimeout(function(){ (e.value ? p : e).focus(); }, 0);
@@ -111,6 +141,7 @@ button:disabled{opacity:.6;cursor:default}
       '<label for="cdPass2">Repita a senha<input id="cdPass2" type="password" autocomplete="new-password" required></label>' +
       '<button type="submit" id="cdGo">Criar conta</button><div class="err" id="cdErr" role="alert">' + esc(msg || "") + '</div>' +
       '<div class="foot">Já tem conta? <button type="button" class="lnk" id="cdBack">Entrar</button></div></form>';
+    olhos();
     var n = document.getElementById("cdNome"), e = document.getElementById("cdEmail"), p = document.getElementById("cdPass"), p2 = document.getElementById("cdPass2"), b = document.getElementById("cdGo"), er = document.getElementById("cdErr");
     setTimeout(function(){ n.focus(); }, 0);
     document.getElementById("cdBack").onclick = function(){ login(); };
